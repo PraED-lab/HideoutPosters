@@ -8,10 +8,10 @@
 
 ## 📸 Screenshots
 
-![Hideout rules poster](screenshots/hideout_rules.png)
+![Hideout rules poster](hideout_rules.png)
 *An included poster on the hideout walls*
 
-![My bike in the garage](screenshots/garage_bike.png)
+![My bike in the garage](garage_bike.png)
 *Your own photo as a poster — landscape format, real proportions*
 
 ## ✨ Features
