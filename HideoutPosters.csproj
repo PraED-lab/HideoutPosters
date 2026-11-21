@@ -5,7 +5,7 @@
     <Nullable>disable</Nullable>
     <AssemblyName>HideoutPosters</AssemblyName>
     <RootNamespace>HideoutPosters</RootNamespace>
-    <Version>0.4.0</Version>
+    <Version>0.2.0</Version>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
   </PropertyGroup>
   <ItemGroup>
