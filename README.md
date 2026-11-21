@@ -30,7 +30,7 @@
 
 **Range Day turns your hideout shooting range into a full game mode.** Open it with the **RANGE DAY** action on the АРСЕНАЛ box at the shooting table.
 
-![Range Day](screenshots/range_day.png)
+![Range Day](range_day.png)
 
 - 🎯 **6 permanent challenges**: Grouping, Bullseye, Speed run, Economy, One shot, Designation
 - 📅 **Daily challenges** generated every day (weapon, fire mode, stance, hip fire, night mode, distance…), plus a **weekly challenge** and surprise **flash challenges**
