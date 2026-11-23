@@ -20,7 +20,7 @@ namespace PraEDLab.HideoutPosters
     [BepInPlugin("praedlab.hideoutposters", "Hideout Posters", PostersPlugin.Ver)]
     public class PostersPlugin : BaseUnityPlugin
     {
-        internal const string Ver = "0.5.21";   // une seule version pour tout le mod
+        internal const string Ver = "0.5.22";   // une seule version pour tout le mod
         internal static PostersPlugin Inst;
         internal static ManualLogSource Log;
         internal const string PosterTpl = "6a1b0c0de0000000000a0001";
@@ -501,7 +501,7 @@ namespace PraEDLab.HideoutPosters
             public Vector3 WPos { get { return Go != null ? Go.transform.position : Pos; } }
             public Quaternion WRot { get { return Go != null ? Go.transform.rotation : Rot; } } }   // Scale : taille propre a CETTE affiche (figee a la pose)
         static readonly System.Collections.Generic.List<Placed> placed = new System.Collections.Generic.List<Placed>();
-        static BepInEx.Configuration.ConfigEntry<KeyCode> kMode, kPlace, kNext, kPrev, kRemove, kBack, kRotL, kRotR, kStraight, kLight, kHelp, kFix, kEdit, kSwitch;
+        static BepInEx.Configuration.ConfigEntry<KeyCode> kMode, kPlace, kNext, kPrev, kRemove, kBack, kRotL, kRotR, kStraight, kLight, kHelp, kFix, kEdit, kSwitch, kReset;
         static string SaveFile { get { return Path.Combine(BepInEx.Paths.ConfigPath, "HideoutPosters_placed.txt"); } }
         int ghostSeed; float roll; int ghostLit, ghostFix, ghostCurl, ghostCol; float ghostScale = -1f; Placed editBackup; System.Collections.Generic.List<Vector3> editHoles; bool mode, pick; Vector2 pickScroll; int hover = -1; CursorLockMode oldLock; bool oldVis; int idx; GameObject ghost; string ghostFile; float nextCheck; bool spawned; string msg; float msgUntil;
 
@@ -522,6 +522,7 @@ namespace PraEDLab.HideoutPosters
             // Q / E font aussi pencher le personnage : on passe une fois sur R / T
             if (kRotL.Value == KeyCode.Q && kRotR.Value == KeyCode.E) { kRotL.Value = KeyCode.R; kRotR.Value = KeyCode.T; PostersPlugin.Log.LogInfo("[pose] rotation : Q/E remplaces par R/T (Q/E penchent le personnage)"); }
             kLight = c.Bind("Free placement", "Light key", KeyCode.L, "While placing: off -> backlit (glows like a light box) -> lamp (a small lamp above lights it like in a gallery)");
+            kReset = c.Bind("Free placement", "Repair all posters key", KeyCode.F9, "Removes the bullet holes from every free poster around you (shooting range reset)");
             kFix = c.Bind("Free placement", "Fixings key", KeyCode.G, "While placing: choose how the poster holds (pins, tape, nails, staples, clips, magnets, duct tape...). SHIFT + this key: which corner is curled");
             kEdit = c.Bind("Free placement", "Edit poster key", KeyCode.Y, "Look at a hung poster and press this key to edit it (size, angle, light, color, fixings, image, position). [P] puts it back as it was");
             kSwitch = c.Bind("Free placement", "Light switch key", KeyCode.O, "Look at a lit poster and press this key to switch its light on / off. SHIFT + this key: switch ALL poster lights of the hideout");
@@ -763,6 +764,7 @@ namespace PraEDLab.HideoutPosters
                 if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) RepairLooked(); else RemoveLooked();
             }
             if (Input.GetKeyDown(kEdit.Value) && !mode) EditLooked();
+            if (kReset != null && Input.GetKeyDown(kReset.Value) && !mode) RepairAll();
             if (Input.GetKeyDown(kSwitch.Value) && !mode) { if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) SwitchAll(); else SwitchLooked(); }
             if (!mode) return;
             var files = PostersPlugin.Files;
@@ -1621,6 +1623,19 @@ namespace PraEDLab.HideoutPosters
                 if (Mathf.Abs(local.x) <= ext.x && Mathf.Abs(local.y) <= ext.y && d < bestD) { bestD = d; best = p; }
             }
             return best;
+        }
+        // F9 : on rebouche les trous de toutes les affiches autour (remise a zero du stand)
+        void RepairAll()
+        {
+            var cam = Camera.main; int n = 0, k = 0;
+            foreach (var p in placed)
+            {
+                if (p == null || p.Go == null || p.Holes.Count == 0) continue;
+                if (cam != null && (p.Go.transform.position - cam.transform.position).sqrMagnitude > 80f * 80f) continue;
+                n += p.Holes.Count; p.Holes.Clear(); BulletHoles.Rebuild(p.Go, p.Holes); k++;
+            }
+            if (k > 0) Save();
+            Note(k > 0 ? k + " poster(s) repaired (" + n + " hole(s) removed)" : "no bullet hole to repair");
         }
         // SHIFT + Suppr : on rebouche tous les trous de balles
         void RepairLooked()
@@ -3186,6 +3201,9 @@ namespace PraEDLab.HideoutPosters
         }
         void Update()
         {
+            // en raid : rien du tout (avant, un FindObjectOfType toutes les 3 s coutait des perfs)
+            bool hid = false; try { hid = Comfort.Common.Singleton<EFT.GameWorld>.Instantiated && Comfort.Common.Singleton<EFT.GameWorld>.Instance is HideoutGameWorld; } catch { }
+            if (!hid) { nightOn = false; return; }
             if (range == null) nightOn = false; else { Night(); Sharp(); if (tvs.Count >= 3) RangeDay.Ensure(tvs.SelectMany(x => x.screens).Where(x => x != null).ToList()); }
             // les 3 teles sont branchees et le stand existe toujours : plus aucun scan (le scan toutes les 3 s faisait un a-coup)
             if (range != null && seen.Count >= 3) return;
@@ -3653,8 +3671,8 @@ namespace PraEDLab.HideoutPosters
             "10 balles. +10 points par cible touchée, +5 en bonus à moins de 5 cm du centre, −5 par balle à côté. Fais le meilleur score.",
             "Une seule balle, le plus près possible du centre de la cible. Pas le droit à l'erreur : toute la pression est sur un tir.",
             "20 secondes. Tire sur les 3 cibles suspendues au rail. L'écran annonce laquelle : GAUCHE, MILIEU ou DROITE, et elle change toutes les 1,5 s. +10 sur la bonne, −10 sur la mauvaise, −5 à côté." };
-        internal static readonly string[][] Med = { new[] { "BRONZE  ≤ 16 MOA", "ARGENT  ≤ 9 MOA", "OR  ≤ 4 MOA" }, new[] { "BRONZE  ≤ 15 MOA", "ARGENT  ≤ 8 MOA", "OR  ≤ 3,5 MOA" }, new[] { "BRONZE  ≤ 6 s", "ARGENT  ≤ 3,5 s", "OR  ≤ 2 s" }, new[] { "BRONZE  ≥ 80 pts", "ARGENT  ≥ 110 pts", "OR  ≥ 135 pts" }, new[] { "BRONZE  ≤ 10 MOA", "ARGENT  ≤ 5 MOA", "OR  ≤ 2 MOA" }, new[] { "BRONZE  ≥ 60 pts", "ARGENT  ≥ 100 pts", "OR  ≥ 140 pts" } };
-        static readonly float[][] Thr = { new[] { 16f, 9f, 4f }, new[] { 15f, 8f, 3.5f }, new[] { 6f, 3.5f, 2f }, new[] { 80f, 110f, 135f }, new[] { 10f, 5f, 2f }, new[] { 60f, 100f, 140f } };
+        internal static readonly string[][] Med = { new[] { "BRONZE  ≤ 16 MOA", "ARGENT  ≤ 9 MOA", "OR  ≤ 4 MOA" }, new[] { "BRONZE  ≤ 15 MOA", "ARGENT  ≤ 8 MOA", "OR  ≤ 3,5 MOA" }, new[] { "BRONZE  ≤ 6 s", "ARGENT  ≤ 3,5 s", "OR  ≤ 2 s" }, new[] { "BRONZE  ≥ 80 pts", "ARGENT  ≥ 110 pts", "OR  ≥ 130 pts" }, new[] { "BRONZE  ≤ 10 MOA", "ARGENT  ≤ 5 MOA", "OR  ≤ 2 MOA" }, new[] { "BRONZE  ≥ 60 pts", "ARGENT  ≥ 100 pts", "OR  ≥ 140 pts" } };
+        static readonly float[][] Thr = { new[] { 16f, 9f, 4f }, new[] { 15f, 8f, 3.5f }, new[] { 6f, 3.5f, 2f }, new[] { 80f, 110f, 130f }, new[] { 10f, 5f, 2f }, new[] { 60f, 100f, 140f } };
         internal static readonly float[] Diff = { 1.3f, 1.3f, 1f, 0.6f, 1.6f, 1f };
         internal static readonly string[] DiffName = { "DIFFICILE", "DIFFICILE", "MOYEN", "FACILE", "TRÈS DIFFICILE", "MOYEN" };
         static readonly string[] Unit = { "MOA", "MOA", "s", "pts", "MOA", "pts" };
@@ -3751,7 +3769,7 @@ namespace PraEDLab.HideoutPosters
         }
         // ================= DEFIS DU JOUR =================
         internal class Daily { public int Mode, Diff; public string[] Cons; public bool Mystery; }
-        static readonly string[] ConsKeys = { "fam:pistolet", "fam:pistolet-mitrailleur", "fam:fusil d'assaut", "fam:DMR", "fam:fusil à verrou", "fam:fusil à pompe", "fire:single", "fire:auto", "pose:crouch", "pose:prone", "pose:stand", "hip", "night", "dist:25", "dist:35" };
+        static readonly string[] ConsKeys = { "fam:pistolet", "fam:pistolet-mitrailleur", "fam:fusil d'assaut", "fam:DMR", "fam:fusil à verrou", "fam:fusil à pompe", "fire:single", "fire:auto", "pose:crouch", "pose:stand", "hip", "night", "dist:25", "dist:35" };
         internal static string ConsLabel(string c)
         {
             if (c.StartsWith("fam:")) { var f = c.Substring(4); return f.Substring(0, 1).ToUpperInvariant() + f.Substring(1); }
@@ -3785,8 +3803,10 @@ namespace PraEDLab.HideoutPosters
         internal static void RollFlash()
         {
             if (flashRolled) return; flashRolled = true;
-            if (UnityEngine.Random.value > 0.35f) return;
-            var r = new System.Random(); var d = new Daily { Mode = r.Next(6), Diff = 4 }; var cons = new System.Collections.Generic.List<string>(); int guard = 0;
+            // tire au sort une fois par jour (meme resultat a chaque lancement du jeu dans la journee)
+            int sd = 7; foreach (var ch in "Flash" + DateTime.Now.ToString("yyyy-MM-dd")) sd = sd * 31 + ch;
+            var r = new System.Random(sd);
+            if (r.NextDouble() > 0.35) return; var d = new Daily { Mode = r.Next(6), Diff = 4 }; var cons = new System.Collections.Generic.List<string>(); int guard = 0;
             while (cons.Count < 1 && guard++ < 40) { var c = ConsKeys[r.Next(ConsKeys.Length)]; if (Compatible(d.Mode, c, cons)) cons.Add(c); }
             d.Cons = cons.ToArray(); flash = d; flashUntil = Time.unscaledTime + 600f; if (today != null) today.Add(d);
             PostersPlugin.Log.LogInfo("[range day] defi eclair : " + Names[d.Mode] + " + " + string.Join(", ", d.Cons));
@@ -3910,6 +3930,33 @@ namespace PraEDLab.HideoutPosters
             rail.Sort((a, b) => Vector3.Dot(a.position - o, right).CompareTo(Vector3.Dot(b.position - o, right)));
             return true;
         }
+        static bool desigScored; static float desigAt;
+        static int LaneOf(Vector3 world)
+        {
+            var cam = Camera.main; if (cam == null || rail.Count < 3) return -1;
+            var o = cam.transform.position; var r = cam.transform.right; var f = cam.transform.forward;
+            System.Func<Vector3, float> ang = v => { var d = v - o; return Mathf.Atan2(Vector3.Dot(d, r), Mathf.Max(0.1f, Vector3.Dot(d, f))); };
+            float a = ang(world); int best = -1; float bd = 999f;
+            for (int i = 0; i < rail.Count; i++) { float d = Mathf.Abs(ang(rail[i].position) - a); if (d < bd) { bd = d; best = i; } }
+            return best;
+        }
+        static readonly System.Collections.Generic.List<Transform> whites = new System.Collections.Generic.List<Transform>();
+        static int WhiteOf(Transform t)
+        {
+            var cam = Camera.main; if (cam == null) return -1;
+            if (whites.Count < 3 || whites.Any(w => w == null))
+            {
+                whites.Clear();
+                foreach (var w in UnityEngine.Object.FindObjectsOfType<Transform>()) if (w.gameObject.activeInHierarchy && w.name.StartsWith("Target_white_changed")) whites.Add(w);
+                PostersPlugin.Log.LogInfo("[range day] designation : plaques blanches " + whites.Count);
+            }
+            if (whites.Count != 3) return -1;
+            var o = cam.transform.position; var r = cam.transform.right; var f = cam.transform.forward;
+            System.Func<Transform, float> ang = w => { var b = w.GetComponentInChildren<Renderer>(); var p = b != null ? b.bounds.center : w.position; var d = p - o; return Mathf.Atan2(Vector3.Dot(d, r), Mathf.Max(0.1f, Vector3.Dot(d, f))); };
+            var sorted = whites.OrderBy(ang).ToList();
+            for (var x = t; x != null; x = x.parent) { int i = sorted.IndexOf(x); if (i >= 0) return i; }
+            return -1;
+        }
         static int RailOf(Transform t) { for (var x = t; x != null; x = x.parent) { int i = rail.IndexOf(x); if (i >= 0) return i; } return -1; }
         static int HangOf(Vector3 world) { int best = -1; float bd = 1.5f * 1.5f; for (int i = 0; i < hang.Count; i++) { var d = world - hang[i]; d.y *= 0.5f; if (d.sqrMagnitude < bd) { bd = d.sqrMagnitude; best = i; } } return best; }
         static bool FindStands()
@@ -3953,8 +4000,10 @@ namespace PraEDLab.HideoutPosters
             if (mode == 5)
             {
                 int k = RailOf(hitT);
+                // cibles papier blanches suspendues (Target_white_changed) : on prend la colonne la plus proche (gauche / milieu / droite)
+                int wk = WhiteOf(hitT); if (wk >= 0) k = wk; else if (IsTarget(hitT) || k < 0) { int l = LaneOf(world); if (l >= 0) k = l; }
                 if (k < 0) { PostersPlugin.Log.LogInfo("[range day] designation : touche " + hitT.name + " < " + (hitT.parent != null ? hitT.parent.name : "-")); return; }
-                hitNow = true; if (k == desig) { score += 10; good++; } else score -= 10;
+                hitNow = true; if (k == desig) { if (!desigScored) { score += 10; good++; desigScored = true; nextDesig = Mathf.Min(nextDesig, Time.unscaledTime + 0.15f); } } else if (Time.unscaledTime - desigAt > 0.3f) score -= 10; PostersPlugin.Log.LogInfo("[range day] designation : colonne " + k + " (annoncee " + desig + ")");
                 return;
             }
             if (Precise())
@@ -4055,6 +4104,7 @@ namespace PraEDLab.HideoutPosters
             if (Enumerable.Range(0, 6).All(m => goldSet.Any(k2 => k2.StartsWith(m + ":")))) achTxt += Unlock(8);
             if (mode == 2 && val > 60f) { SendReward(0, "Chrono de plus de 60 s", "5bc9c29cd4351e003562b8a3"); achTxt += "\n<color=#8a9aa6>Plus de 60 s… une boîte de sprats t'attend dans tes messages</color>"; }
             string xpTxt = "  ·  <color=#9fc47a>+" + gain + " XP</color>" + mstTxt + rewardTxt + achTxt + (gain == 0 && daily < 0 && rewardTxt.Length == 0 ? " (plafond du jour)" : "") + (Rank() > rankBefore ? "\n<color=#f0cd86>NOUVEAU RANG " + Rank() + " · " + GradeName() + "</color>" : "");
+            if (mr >= 0) RangeDayUI.Freeze(2.5f);
             Snd(mr == 2 ? EFT.UI.EUISoundType.AchievementCompleted : mr == 1 ? EFT.UI.EUISoundType.QuestCompleted : mr == 0 ? EFT.UI.EUISoundType.QuestSubTrackComplete : EFT.UI.EUISoundType.QuestFailed);
             if (achTxt.Length > 0) Snd(EFT.UI.EUISoundType.AchievementCompleted);
             Show("<color=" + col + ">" + medal + "</color>", detail + "  ·  " + wname + "\n" + (rec ? "<color=#f0cd86>NOUVEAU RECORD</color>  ·  " : "") + next + xpTxt, 9f);
@@ -4090,15 +4140,15 @@ namespace PraEDLab.HideoutPosters
                 if (e < 3f && n != lastBeep) { lastBeep = n; Snd(EFT.UI.EUISoundType.MenuCheckBox); }
                 if (e < 3f) { big.text = n.ToString(); small.text = Names[mode] + "  ·  " + Kick[mode] + (daily >= 0 ? "\n<color=#f0cd86>" + string.Join("  ·  ", Today()[daily].Cons.Select(ConsLabel).ToArray()) + "</color>" : ""); big.transform.localScale = Vector3.one * (1.25f - 0.25f * (e - Mathf.Floor(e))); }
                 else if (e < 3.7f) { if (lastBeep != 0) { lastBeep = 0; Snd(EFT.UI.EUISoundType.MenuInstallMag); } big.text = "TIREZ !"; small.text = ""; big.transform.localScale = Vector3.one; if (shots == 0 && st == St.Count) { } }
-                if (e >= 3f && st == St.Count) { st = St.Run; t0 = now; firstShot = now; desig = UnityEngine.Random.Range(0, 3); nextDesig = now + 1.5f; PostersPlugin.Log.LogInfo(L("go")); }
+                if (e >= 3f && st == St.Count) { st = St.Run; t0 = now; firstShot = now; desig = UnityEngine.Random.Range(0, 3); nextDesig = now + 1.5f; desigScored = false; desigAt = now + 0.5f; good = 0; PostersPlugin.Log.LogInfo(L("go")); }
                 return;
             }
             if (st == St.Run)
             {
                 if (mode == 5)
                 {
-                    if (now >= nextDesig) { int nd = UnityEngine.Random.Range(0, 2); desig = (desig + 1 + nd) % 3; nextDesig = now + 1.5f; }
-                    if (desig != lastDesig) { lastDesig = desig; Snd(EFT.UI.EUISoundType.MenuCheckBox); }
+                    if (now >= nextDesig) { int nd = UnityEngine.Random.Range(0, 2); desig = (desig + 1 + nd) % 3; nextDesig = now + 1.5f; desigScored = false; }
+                    if (desig != lastDesig) { lastDesig = desig; desigAt = Time.unscaledTime; Snd(EFT.UI.EUISoundType.MenuCheckBox); }
                     big.text = Side[desig]; big.transform.localScale = Vector3.one * 0.8f;
                     small.text = "DÉSIGNATION  ·  " + score + " pts  ·  " + Mathf.Max(0f, 20f - (now - t0)).ToString("0.0") + " s";
                     if (now - t0 >= 20f) Finish();
@@ -4132,12 +4182,15 @@ namespace PraEDLab.HideoutPosters
             GoldC = new Color(0.85f, 0.71f, 0.42f), Cream = new Color(0.91f, 0.89f, 0.82f), Teal = new Color(0.50f, 0.66f, 0.64f), Sub = new Color(0.66f, 0.65f, 0.58f);
         static readonly string[] Tabs = { "DÉFIS DU JOUR", "PERMANENTS", "ARSENAL", "SUCCÈS" };
         internal static bool IsOpen { get { return me != null; } }
-        static bool inputPatched; static int blockUntil;
+        static bool inputPatched; static int blockUntil; static float freezeUntil;
+        // fin de defi avec medaille : on fige le joueur un instant pour qu'il voie son resultat
+        internal static void Freeze(float secs) { freezeUntil = Time.unscaledTime + secs; }
         // fenetre ouverte : le jeu ne recoit plus aucune touche (Echap ne fait pas quitter la planque, le clic ne tire pas, on ne bouge pas)
         static bool BlockInput(EFT.InputSystem.InputNodeAbstract __instance, System.Collections.Generic.List<EFT.InputSystem.ECommand> commands, ref float[] axes, ref EFT.InputSystem.ECursorResult shouldLockCursor)
         {
-            if ((me == null && Time.frameCount > blockUntil) || !(__instance is EFT.InputSystem.InputTree)) return true;
-            try { commands.Clear(); if (axes != null) for (int i = 0; i < axes.Length; i++) axes[i] = 0f; shouldLockCursor = EFT.InputSystem.ECursorResult.ShowCursor; } catch { }
+            bool frozen = Time.unscaledTime < freezeUntil;
+            if ((me == null && Time.frameCount > blockUntil && !frozen) || !(__instance is EFT.InputSystem.InputTree)) return true;
+            try { commands.Clear(); if (axes != null) for (int i = 0; i < axes.Length; i++) axes[i] = 0f; if (me != null || Time.frameCount <= blockUntil) shouldLockCursor = EFT.InputSystem.ECursorResult.ShowCursor; } catch { }
             return false;
         }
         // ---------- defi mystere : 3 cartes a choisir a la souris ----------
@@ -4167,8 +4220,8 @@ namespace PraEDLab.HideoutPosters
             var ov = Pic("Cards", win, sBack, Color.white, Image.Type.Simple); ov.raycastTarget = true;
             FreePlace.Rt(ov.gameObject, win, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
             var dim = Pic("Dim", ov.transform, sGlow, new Color(0, 0, 0, 0.55f), Image.Type.Simple); FreePlace.Rt(dim.gameObject, ov.transform, Vector2.zero, Vector2.one, Vector2.zero, Vector2.zero);
-            var tag = FreePlace.Txt("K", ov.transform, "RANGE DAY  ·  RÉCOMPENSE CACHÉE", 16, GoldC, TextAlignmentOptions.Center, false); FreePlace.Rt(tag.gameObject, ov.transform, new Vector2(0, 0.91f), new Vector2(1, 0.95f), Vector2.zero, Vector2.zero); tag.characterSpacing = 14;
-            cTitle = FreePlace.Txt("H", ov.transform, (pendLabel ?? "défi mystère").ToUpperInvariant() + "\n<size=40%><color=#8a9aa6>CHOISIS UNE CARTE</color></size>", 60, Cream, TextAlignmentOptions.Center, true);
+            var tag = FreePlace.Txt("K", ov.transform, "", 16, GoldC, TextAlignmentOptions.Center, false); FreePlace.Rt(tag.gameObject, ov.transform, new Vector2(0, 0.91f), new Vector2(1, 0.95f), Vector2.zero, Vector2.zero); tag.characterSpacing = 14;
+            cTitle = FreePlace.Txt("H", ov.transform, "<size=70%>" + (pendLabel ?? "défi mystère").ToUpperInvariant() + "</size>", 60, Cream, TextAlignmentOptions.Center, true);
             FreePlace.Rt(cTitle.gameObject, ov.transform, new Vector2(0, 0.76f), new Vector2(1, 0.91f), Vector2.zero, Vector2.zero); cTitle.enableAutoSizing = true; cTitle.fontSizeMin = 18; cTitle.fontSizeMax = 60; cTitle.enableWordWrapping = false;
             var line = Pic("L", ov.transform, sRound4, new Color(0.85f, 0.71f, 0.42f, 0.35f), Image.Type.Sliced); var lr = (RectTransform)line.transform; lr.anchorMin = lr.anchorMax = new Vector2(0.5f, 0.755f); lr.sizeDelta = new Vector2(420, 2);
             var vt = MysteryCards.RandomVerso(); var vs = vt != null ? Sprite.Create(vt, new Rect(0, 0, vt.width, vt.height), new Vector2(0.5f, 0.5f)) : null;
@@ -4176,10 +4229,10 @@ namespace PraEDLab.HideoutPosters
             {
                 if (i > 0) { vt = MysteryCards.RandomVerso(); vs = vt != null ? Sprite.Create(vt, new Rect(0, 0, vt.width, vt.height), new Vector2(0.5f, 0.5f)) : null; }
                 int k = i; var anchor = new Vector2(0.24f + i * 0.26f, 0.42f);
-                var gl = Pic("G" + i, ov.transform, sGlow, new Color(0.85f, 0.71f, 0.42f, 0f), Image.Type.Simple); var gr2 = (RectTransform)gl.transform; gr2.anchorMin = gr2.anchorMax = anchor; gr2.sizeDelta = new Vector2(560, 700);
-                var fr = Pic("F" + i, ov.transform, sRound4, new Color(0.85f, 0.71f, 0.42f, 0.55f), Image.Type.Sliced); var fr2 = (RectTransform)fr.transform; fr2.anchorMin = fr2.anchorMax = anchor; fr2.sizeDelta = new Vector2(312, 462);
+                var gl = Pic("G" + i, ov.transform, sGlow, new Color(0.85f, 0.71f, 0.42f, 0f), Image.Type.Simple); var gr2 = (RectTransform)gl.transform; gr2.anchorMin = gr2.anchorMax = anchor; gr2.sizeDelta = new Vector2(400, 500);
+                var fr = Pic("F" + i, ov.transform, sRound4, new Color(0.85f, 0.71f, 0.42f, 0.55f), Image.Type.Sliced); var fr2 = (RectTransform)fr.transform; fr2.anchorMin = fr2.anchorMax = anchor; fr2.sizeDelta = new Vector2(232, 342);
                 var im = Pic("C" + i, ov.transform, vs ?? sRound4, Color.white, vs != null ? Image.Type.Simple : Image.Type.Sliced); im.raycastTarget = true;
-                var rt = (RectTransform)im.transform; rt.anchorMin = rt.anchorMax = anchor; rt.sizeDelta = new Vector2(300, 450);
+                var rt = (RectTransform)im.transform; rt.anchorMin = rt.anchorMax = anchor; rt.sizeDelta = new Vector2(220, 330);
                 cFrame[i] = fr;
                 var tx = FreePlace.Txt("T", im.transform, "", 40, Color.white, TextAlignmentOptions.Center, true); FreePlace.Rt(tx.gameObject, im.transform, Vector2.zero, Vector2.one, new Vector2(16, 16), new Vector2(-16, -16));
                 im.gameObject.AddComponent<Button>().onClick.AddListener(() => PickCard(k));
@@ -4187,7 +4240,7 @@ namespace PraEDLab.HideoutPosters
             }
             var tiers0 = (int[])cTiers.Clone();
             System.Threading.Tasks.Task.Run(() => { for (int i = 0; i < 3; i++) cTpl[i] = RangeGame.PreviewTpl(tiers0[i]); });
-            cHint = FreePlace.Txt("F", ov.transform, "UN BON SCORE AMÉLIORE LES CARTES  ·  DE ABSURDE À LÉGENDAIRE", 15, Sub, TextAlignmentOptions.Center, false); FreePlace.Rt(cHint.gameObject, ov.transform, new Vector2(0, 0.04f), new Vector2(1, 0.09f), Vector2.zero, Vector2.zero); cHint.characterSpacing = 8;
+            cHint = FreePlace.Txt("F", ov.transform, "", 15, Sub, TextAlignmentOptions.Center, false); FreePlace.Rt(cHint.gameObject, ov.transform, new Vector2(0, 0.04f), new Vector2(1, 0.09f), Vector2.zero, Vector2.zero); cHint.characterSpacing = 8;
         }
         void PickCard(int k)
         {
@@ -4210,10 +4263,10 @@ namespace PraEDLab.HideoutPosters
             if (cPick >= 0 && cShown.All(x => x))
             {
                 if (cDoneAt < 0) cDoneAt = now;
-                float left = 6f - (now - cDoneAt); cHint.text = "FERMETURE DANS " + Mathf.CeilToInt(Mathf.Max(0, left)) + " S  ·  ÉCHAP POUR FERMER";
+                float left = 6f - (now - cDoneAt); cHint.text = "";
                 if (left <= 0f) { Close(); return; }
             }
-            else if (cPick >= 0) cHint.text = "LES AUTRES CARTES SE RETOURNENT…";
+
             for (int i = 0; i < 3; i++)
             {
                 var t0 = cImg[i].transform; if (cFrame[i] != null) { cFrame[i].transform.localScale = t0.localScale; cFrame[i].transform.localRotation = t0.localRotation; }
@@ -4259,7 +4312,7 @@ namespace PraEDLab.HideoutPosters
                     cTx[i].rectTransform.anchorMax = new Vector2(1f, 0.34f);
                     cTx[i].text = "<size=55%>" + (cName[i] ?? "") + "</size>\n<size=38%><color=" + hx + ">" + CardTN[cTiers[i]] + "</color>" + (mine ? "" : "  ·  <color=#6f7a80>RATÉ</color>") + "</size>";
                     cTx[i].color = mine ? Cream : new Color(0.62f, 0.64f, 0.62f);
-                    if (i == cPick) cTitle.text = "<size=60%><color=" + hx + ">" + (cName[i] ?? CardTN[cTiers[i]]) + "</color></size>\n<size=40%><color=#8a9aa6>" + CardTN[cTiers[i]] + "  ·  VÉRIFIE TA MESSAGERIE</color></size>";
+                    if (i == cPick) cTitle.text = "<size=60%><color=" + hx + ">" + (cName[i] ?? CardTN[cTiers[i]]) + "</color></size>";
                 }
                 if (cShown[i] && i == cPick) cGlow[i].transform.localScale = Vector3.one * (1f + 0.06f * Mathf.Sin(now * 3f));
             }
@@ -4514,7 +4567,7 @@ namespace PraEDLab.HideoutPosters
                     var ed = Pic("E", bg.transform, sRound4, week ? new Color(0.85f, 0.71f, 0.42f, 0.5f) : new Color(0.62f, 0.84f, 0.81f, 0.10f), Image.Type.Sliced); FreePlace.Rt(ed.gameObject, bg.transform, Vector2.zero, new Vector2(1, 0), Vector2.zero, new Vector2(0, 2));
                     string lab = (d.Mystery ? "MYSTÈRE" : RangeGame.DiffDay[d.Diff]) + (week ? "" : "");
                     var dl1 = FreePlace.Txt("K", bg.transform, lab, 13, dc, TextAlignmentOptions.TopLeft, false); FreePlace.Rt(dl1.gameObject, bg.transform, Vector2.zero, Vector2.one, new Vector2(18, 10), new Vector2(-18, -12)); dl1.characterSpacing = 14;
-                    var x1 = FreePlace.Txt("X", bg.transform, done != null ? "" : RangeGame.DayXp[d.Diff] + " XP", 14, Sub, TextAlignmentOptions.TopRight, false); FreePlace.Rt(x1.gameObject, bg.transform, Vector2.zero, Vector2.one, new Vector2(18, 10), new Vector2(-18, -12));
+                    var x1 = FreePlace.Txt("X", bg.transform, done != null || week ? "" : RangeGame.DayXp[d.Diff] + " XP", 14, Sub, TextAlignmentOptions.TopRight, false); FreePlace.Rt(x1.gameObject, bg.transform, Vector2.zero, Vector2.one, new Vector2(18, 10), new Vector2(-18, -12));
                     if (done != null) { var md = Pic("M", bg.transform, sDot, done == "OR" ? new Color(0.98f, 0.85f, 0.5f) : done == "ARGENT" ? new Color(0.85f, 0.87f, 0.9f) : new Color(0.85f, 0.6f, 0.4f), Image.Type.Simple); var mr = (RectTransform)md.transform; mr.anchorMin = mr.anchorMax = new Vector2(1, 1); mr.sizeDelta = new Vector2(22, 22); mr.anchoredPosition = new Vector2(-28, -22); }
                     string cons = string.Join(" ", d.Cons.Select(c => "<mark=#9fd6cf18> " + RangeGame.ConsLabel(c) + " </mark>").ToArray());
                     var t1 = FreePlace.Txt("T", bg.transform, "<size=" + (week ? 24 : 21) + ">" + RangeGame.Names[d.Mode] + "</size>\n<size=13><color=#c9c5b1>" + cons + "</color></size>", 21, Cream, TextAlignmentOptions.TopLeft, true);
@@ -4572,9 +4625,11 @@ namespace PraEDLab.HideoutPosters
                     {
                         EFT.InventoryLogic.Item it = null; var gw = Comfort.Common.Singleton<EFT.GameWorld>.Instance; var pl = gw != null ? gw.MainPlayer : null;
                         if (pl != null) it = pl.Inventory.GetPlayerItems(EFT.InventoryLogic.EPlayerItems.All).FirstOrDefault(x => x is EFT.InventoryLogic.Weapon && x.TemplateId.ToString() == rw[7]);
+                        // arme plus dans l'inventaire : on prend le modele de base du jeu
+                        if (it == null) try { it = Comfort.Common.Singleton<EFT.ItemFactory>.Instance.CreateItem(Guid.NewGuid().ToString("N").Substring(0, 24), rw[7], null); } catch { }
                         if (it != null)
                         {
-                            var ic = EFT.UI.DragAndDrop.ItemViewFactory.LoadItemIcon(it, 1, false);
+                            var ic = EFT.UI.DragAndDrop.ItemViewFactory.LoadItemIcon(it, 1, true);
                             var wi = Pic("Icon", cd.transform, null, Color.white, Image.Type.Simple); wi.preserveAspect = true; wi.enabled = false;
                             FreePlace.Rt(wi.gameObject, cd.transform, new Vector2(0.15f, 0.03f), new Vector2(0.85f, 0.33f), Vector2.zero, Vector2.zero);
                             icons.Add(new System.Collections.Generic.KeyValuePair<Image, ItemIcon>(wi, ic));

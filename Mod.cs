@@ -22,11 +22,11 @@ namespace HideoutPosters;
 
 public record ModMetadata : IModMetadata
 {
-    public string ModGuid { get; init; } = "praedlab.hideoutposters.server";
+    public string ModGuid { get; init; } = "praedlab.hideoutposters";
     public string Name { get; init; } = "Hideout Posters";
     public string Author { get; init; } = "PraED_TV";
     public List<string> Contributors { get; init; } = new();
-    public Version Version { get; init; } = new("0.5.6");
+    public Version Version { get; init; } = new("0.5.22");
     public Range SptVersion { get; init; } = new("~4.1.0");
     public bool HasPrepatcher { get; init; } = false;
     public List<string> Incompatibilities { get; init; } = new();
